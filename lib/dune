@@ -1,0 +1,4 @@
+(library
+ (name gemsrv)
+ (public_name gemini-server)
+ (libraries text uri lwt_ssl))
