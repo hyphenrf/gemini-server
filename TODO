@@ -1,0 +1,16 @@
+Immediate:
+- Properly close handled SSL connections
+- Make code asynchronous (I'm learning as I go)
+- Make sure all handled resources are closed properly (Gc hooks?)
+- Context should be globally accessed within the module instead of being passed
+  around.
+- optionally pass host to handler registry function in addition to path.
+  Allowing for host-defined behaviour.
+
+Intermediate:
+- Break dependency on openssl by using Mirage's TLS
+- Consider breaking dependency on Text in favour of more homebrew utf-8 handling
+
+Final:
+- Make the implementation more performant (benchmarks) and write tests where
+  input is to be expected.
