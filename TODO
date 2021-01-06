@@ -8,6 +8,7 @@ Immediate:
   Allowing for host-defined behaviour.
 
 Intermediate:
+- Write Examples
 - Break dependency on openssl by using Mirage's TLS
 - Consider breaking dependency on Text in favour of more homebrew utf-8 handling
 

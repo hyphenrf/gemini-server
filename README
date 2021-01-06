@@ -1,0 +1,20 @@
+open Gemsrv
+
+let state = init {statedef with
+	keypath="certs/cert.key"; 
+	crtpath="certs/cert.crt";
+}
+
+let _main =
+    let buffer = Bytes.create state.hdrlen in
+    print "Working Dir: %s\n%!" state.workdir;
+
+    while true do
+    begin
+        let* sock, _ = recv state in
+        let* request = read state sock buffer in
+        let handler = get_handler state request in
+        let answer = handler request in
+            Some(write sock answer)
+    end |> ignore
+    done
