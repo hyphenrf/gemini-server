@@ -23,17 +23,19 @@ type status =
     | InputReq  | Sensitive
     | Success
     | MovedTemp | MovedPerm
-    | FailTemp  | Unavailiable | CGI  | Proxy | Yamete
-    | FailPerm  | Notfound     | Gone | ProxyRefused | Bad
+    | FailTemp  | Unavailiable | CGI  | ProxyError   | Yamete
+    | FailPerm  | Notfound     | Gone | ProxyRefused | BadReq
     | CertReq   | Unauthorized | Invalid
 
 let intcode = function
-    | InputReq  | Sensitive                                -> 10
-    | Success                                              -> 20
-    | MovedTemp | MovedPerm                                -> 30
-    | FailTemp  | Unavailiable | CGI  | Proxy | Yamete     -> 40
-    | FailPerm  | Notfound     | Gone | ProxyRefused | Bad -> 50
-    | CertReq   | Unauthorized | Invalid                   -> 60
+    | InputReq  -> 10 | Sensitive    -> 11
+    | Success   -> 20
+    | MovedTemp -> 30 | MovedPerm    -> 31
+    | FailTemp  -> 40 | Unavailiable -> 41 | CGI     -> 42 | ProxyError   -> 43 | Yamete -> 44
+    | FailPerm  -> 50 | Notfound     -> 51 | Gone    -> 52 | ProxyRefused -> 53 | BadReq -> 59
+    | CertReq   -> 60 | Unauthorized -> 61 | Invalid -> 62
+
+(* Or How I Wish For Enums *)
 
 (*
  PROTOCOL: Listen on 1965
@@ -59,9 +61,8 @@ type string = Text.t
 
 type header = status * string
 type bodied = status * string * Unix.file_descr
-
-type answer = Header: header -> answer
-            | Bodied: bodied -> answer
+type answer = Header of header
+            | Bodied of bodied
 
 type state = {
     (* paths*)
@@ -73,7 +74,7 @@ type state = {
     host     : Unix.inet_addr;
     sock     : Unix.file_descr;
     (* ssl stuff *)
-    ctx      : Ssl.context option;
+    ctx      : Ssl.context option; (* I hate it being an option *)
     ssldis   : Ssl.protocol list;
     (* gemini stuff *)
     hdrlen   : int;
