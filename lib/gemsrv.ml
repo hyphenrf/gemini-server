@@ -95,23 +95,22 @@ let statedef = {
     hdrlen   = 1024+2;
     nofcon   = 15;
     handlers = Hashtbl.create 64 ~random:true;
-    handldef = fun uri -> let module Path = Filename in
+    handldef = fun uri ->
     Uri.(path uri |> pct_decode)
       |> (function
           | "" -> "index.gmi"
-          | p when String.ends_with p "/" -> Path.(concat p "index.gmi")
+          | p when String.ends_with p "/" -> Filename.(concat p "index.gmi")
           | p -> p)
       |> String.split ~sep:"/"
       |> List.filter ((<>) "..")
       |> String.concat "/"
-      |> Path.concat "."
+      |> Filename.concat "."
       |> (fun file ->
           let ans = match Unix.(openfile file [O_RDONLY] 0) with
             | exception _->
                     Header(Notfound, "Page Requested Not Foud.")
             | fd ->
-                    Gc.(finalise(fun f->finalise_release();Unix.close f)) fd;
-                    Bodied(Success,  "text/gemini", fd)
+                    Bodied(Success, "text/gemini", fd)
           in ans);
 }
 
@@ -146,12 +145,13 @@ let init st =
         register_handler st st.handldef "/";
     in
     let rec descend dir =
-        Sys.readdir dir |> Array.iter (
-            fun node ->
-                register_handler st st.handldef node;
-                if Sys.is_directory node then
-                    descend node
-                else ()
+        match Sys.readdir dir with
+        | exception _-> ()
+        | a -> a |> Array.iter (fun node ->
+            register_handler st st.handldef node;
+            if Sys.is_directory node then
+                descend node
+            else ()
         )
     in descend st.workdir;
     (* return new state: *) st
@@ -198,7 +198,7 @@ let write_header ssl_sock status meta =
 let write_eof ssl_sock =
     Ssl.output_string ssl_sock "\xff\xff\xff\xff"
 
-let write ssl_sock resp =
+let write st ssl_sock resp =
     begin match resp with
     | Header(status, meta) ->
         write_header ssl_sock status meta
@@ -206,7 +206,8 @@ let write ssl_sock resp =
         write_header ssl_sock status meta;
         pipe fd ssl_sock
     ) end;
-    write_eof ssl_sock;
-    Ssl.flush ssl_sock;
-    Ssl.shutdown ssl_sock;
+    write_eof ssl_sock; (* Will this close the connection? *)
+    Ssl.flush ssl_sock; (* Will this close the connection? *)
+    Ssl.shutdown ssl_sock; (* Will this close the connection? *)
+    Unix.close st.sock (* Will THIS close the connection? *)
 
