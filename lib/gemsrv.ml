@@ -51,9 +51,12 @@ let intcode = function
 
  TLS SNI is mandatory >=v1.2 (1.3 pref)
 *)
+open Lwt.Syntax
+open Lwt.Infix
 
-let fmt = Printf.sprintf
-let print = Printf.printf
+module L = Lwt
+module IO = Lwt_io
+module Lu = Lwt_unix
 
 (* UTF-8 aware Strings *)
 module String = Text
@@ -72,13 +75,10 @@ type config = {
     crtpath  : string;
     (* unix stuff *)
     port     : int;
-    host     : Unix.inet_addr;
-    sock     : Unix.file_descr;
-    (* ssl stuff *)
-    ctx      : Ssl.context option; (* I hate it being an option *)
-    ssldis   : Ssl.protocol list;
+    host     : Lu.inet_addr;
+    sock     : Lu.file_descr;
     (* gemini stuff *)
-    hdrlen   : int;
+    tlsver   : Tls.Core.tls_version * Tls.Core.tls_version;
     nofcon   : int;
     handlers : (string, handler) Hashtbl.t;
     handldef : handler;
@@ -89,11 +89,9 @@ let defconfig = {
     keypath  = Filename.concat (Sys.getcwd()) "cert.key";
     crtpath  = Filename.concat (Sys.getcwd()) "cert.crt";
     port     = 1965;
-    host     = Unix.inet_addr_of_string "0.0.0.0";
-    sock     = Unix.(socket PF_INET SOCK_STREAM 0);
-    ctx      = None;
-    ssldis   = Ssl.[SSLv23; TLSv1; TLSv1_1];
-    hdrlen   = 1024+2;
+    host     = Unix.inet_addr_any;
+    sock     = Lu.(socket PF_INET SOCK_STREAM 0);
+    tlsver   = Tls.Core.(`TLS_1_2, `TLS_1_3)[@warning "-33"]; (* WHY????? *)
     nofcon   = 15;
     handlers = Hashtbl.create 64 ~random:true;
     handldef = fun uri ->
@@ -118,95 +116,103 @@ let defconfig = {
     - making state a global/internal variable
     ... or maybe I should go with the private variable route *)
 
-let register_handler st callback path =
-    Hashtbl.replace st.handlers path callback
+(* init functions *)
 
-let init st =
-    let st = let open Ssl in
-        init ~thread_safe:true ();
+let register_handler cfg callback uri =
+    Hashtbl.replace cfg.handlers uri callback
 
-        let context = Option.value st.ctx
-            ~default:(create_context SSLv23 Server_context)
-        in
-        disable_protocols context st.ssldis;
-        use_certificate context st.crtpath st.keypath;
-        {st with ctx = Some context}
-    in
-    let () = let open Unix in
-        let addr = ADDR_INET(st.host, st.port) in
-        setsockopt st.sock SO_REUSEADDR true;
-        bind st.sock addr;
-        listen st.sock st.nofcon;
-    in
-    let () =
-        Sys.chdir st.workdir;
-        register_handler st st.handldef  "";
-        register_handler st st.handldef "/";
-    in
+let get_handler cfg uri =
+    Hashtbl.find_opt cfg.handlers uri
+    |> Option.value ~default:cfg.handldef
+
+(* Using a hashtable is probably fragile. I can imagine things getting weird
+ * with CGI params. But I'll leave parsing those as the job of a handler.
+ * That in mind, a typical usage would be:
+ *   register "[[scheme]host]/path",
+ *   get ([[Uri.scheme req ^] Uri.host req ^] Uri.path req),
+ *   handle req <-- here we start looking at cgi params.
+ * An alternative would be to hash the uri directly but this is probably a bad
+ * idea. URI requests are highly variable. Is URI slicing a thing?
+ * Anyway, programmer doesn't even have to rely on these functions -- they can
+ * define their own handling logic.  *)
+
+
+let build_workspace cfg =
     let rec descend dir =
         match Sys.readdir dir with
         | exception _-> ()
-        | a -> a |> Array.iter (fun node ->
-            register_handler st st.handldef node;
-            if Sys.is_directory node then
-                descend node
+        | arr -> arr |> Array.iter (fun node ->
+            let realpath = Filename.concat dir node in
+            let regipath = "/"^String.lchop realpath in
+            register_handler cfg cfg.handldef regipath;
+            if Sys.is_directory realpath then
+                descend realpath
             else ()
         )
-    in descend st.workdir;
-    (* return new state: *) st
-
-let ( let* ) = Option.bind
-let recv st =
-    let* context = st.ctx in
-    let sock, ip = Unix.accept st.sock in
-    let ssl_sock = Ssl.embed_socket sock context in
-        Ssl.accept ssl_sock;
-    Some(ssl_sock, ip)
-
-let read st ssl_sock buf =
-    let len = Ssl.read ssl_sock buf 0 st.hdrlen in
-    let msg = Bytes.(sub buf 0 len |> to_string) in
-    let open String in
-    let* req = if ends_with msg "\r\n" then
-        match msg |> Uri.pct_decode |> check with
-        | None -> Some msg (* we good *)
-        | Some _er -> None
-    else
-        None
     in
-        Some(Uri.of_string (strip req))
+    Sys.chdir cfg.workdir;
+    register_handler cfg cfg.handldef  "";
+    register_handler cfg cfg.handldef "/";
+    descend "."
 
-let get_handler st uri =
-    Hashtbl.find_opt st.handlers (Uri.path uri)
-    |> Option.value ~default:st.handldef
+let init_socket cfg = let open Lu in
+    let sock = cfg.sock in
+    let addr = ADDR_INET(cfg.host, cfg.port) in
+    setsockopt sock SO_REUSEADDR true;
+    bind sock addr >|= fun () ->
+    Lu.listen sock cfg.nofcon
+
+let init_ssl cfg =
+    let+ cert = X509_lwt.private_of_pems
+        ~priv_key:cfg.keypath
+        ~cert:cfg.crtpath
+    in
+    let null_auth ~host:_ _ = Ok None in
+    Tls.Config.server
+        ~certificates:(`Single cert)
+        ~authenticator:null_auth ()
+
+let init cfg =
+    let* _sock = init_socket cfg in
+    let* state = init_ssl cfg in
+    let _workd = build_workspace cfg in
+        L.return state
+
+(* loop functions *)
+let recv server cfg =
+    Tls_lwt.Unix.accept server cfg.sock
+
+let read session =
+    let  buf = Bytes.create (1024+2) |> Cstruct.of_bytes in
+    let+ len = Tls_lwt.Unix.read session buf in
+    let  msg = Cstruct.sub buf 0 len |> Cstruct.to_string in
+    let  req = if String.ends_with msg "\r\n" then
+        match msg |> Uri.pct_decode |> String.check with
+        | None -> msg (* we good *)
+        | Some _-> failwith "Bad Request Encoding"
+    else
+        failwith "Bad Request Length"
+    in
+    String.strip req |> Uri.of_string
+
+let write_header session status meta =
+    Printf.sprintf "%d %s\r\n" (intcode status) meta
+    |> String.encode ~encoding:"utf-8"
+    |> Cstruct.of_string
+    |> Tls_lwt.Unix.write session
 
 let pipe fdin fdout =
-    let bufl = 1024 in
-    let buff = Bytes.create bufl in
-    let rec writeb _n =
-        let len = Unix.read fdin buff 0 bufl in
-        if  len > 0 then Ssl.write fdout buff 0 len
-                    |> writeb
-    in writeb 0
+    let fdin = IO.(of_unix_fd fdin ~mode:Input) in
+    let stream = IO.read_lines fdin in
+    let output = IO.write_lines fdout stream in
+        output
 
-let write_header ssl_sock status meta =
-    fmt "%d %s\r\n" (intcode status) meta
-    |> String.encode ~encoding:"utf-8"
-    |> Ssl.output_string ssl_sock
-
-let write_eof ssl_sock =
-    Ssl.output_string ssl_sock "\xff\xff\xff\xff"
-
-let write st ssl_sock resp =
+let write session resp =
     begin match resp with
     | Header(status, meta) ->
-        write_header ssl_sock status meta
-    | Bodied(status, meta, fd) -> (
-        write_header ssl_sock status meta;
-        pipe fd ssl_sock
-    ) end;
-    write_eof ssl_sock; (* Will this close the connection? *)
-    Ssl.flush ssl_sock; (* Will this close the connection? *)
-    Ssl.shutdown ssl_sock; (* Will this close the connection? *)
-    Unix.close st.sock (* Will THIS close the connection? *)
+        write_header session status meta
+    | Bodied(status, meta, fd) ->
+        write_header session status meta
+        >>= fun () -> pipe fd (snd @@ Tls_lwt.of_t session)
+    end >>= fun () -> Tls_lwt.Unix.close_tls session
 
