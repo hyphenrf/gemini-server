@@ -1,16 +1,20 @@
 Immediate:
-- Properly close handled SSL connections
+o Properly close handled SSL connections
 - Make code asynchronous (I'm learning as I go)
 - Make sure all handled resources are closed properly (Gc hooks?)
 - Context should be globally accessed within the module instead of being passed
   around.
-- optionally pass host to handler registry function in addition to path.
+o optionally pass host to handler registry function in addition to path.
   Allowing for host-defined behaviour.
 
 Intermediate:
-- Write Examples
-- Break dependency on openssl by using Mirage's TLS
+- SNI
+o Write Examples
+- Write *more* Examples
+o Break dependency on openssl by using Mirage's TLS
 - Consider breaking dependency on Text in favour of more homebrew utf-8 handling
+- Right now no throw is handled (ssl, unix, ...). Should we handle them
+  ourselves or should we let user decide?
 
 Final:
 - Make the implementation more performant (benchmarks) and write tests where

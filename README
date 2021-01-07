@@ -1,20 +1,25 @@
+(* Gemini-Server: Simplest possible server example *)
+
+open Lwt.Syntax
 open Gemsrv
 
-let state = init {statedef with
-	keypath="certs/cert.key"; 
-	crtpath="certs/cert.crt";
+let conf = {
+  defconfig with
+    workdir = "server";
+    keypath = "certs/cert.key";
+    crtpath = "certs/cert.crt";
 }
 
-let _main =
-    let buffer = Bytes.create state.hdrlen in
-    print "Working Dir: %s\n%!" state.workdir;
+let main () =
+    let* state = init conf in
+    let rec loop () =
+        let* session, _ = recv state conf in
+        let* request = read session in
+        let  handler = get_handler conf (Uri.path request) in
+        let  ans = handler request in
+        let* res = write session ans in
+            loop res
+    in
+    loop ()
 
-    while true do
-    begin
-        let* sock, _ = recv state in
-        let* request = read state sock buffer in
-        let handler = get_handler state request in
-        let answer = handler request in
-            Some(write sock answer)
-    end |> ignore
-    done
+let () = Lwt_main.run @@ main ()
