@@ -49,7 +49,9 @@ val get_handler : config -> string -> handler
 
 val init : config -> Tls.Config.server Lwt.t
 
-val recv : Tls.Config.server -> config -> (Tls_lwt.Unix.t * Lwt_unix.sockaddr) Lwt.t
+val reinit : config -> Tls.Config.server Lwt.t
+
+val recv : Tls.Config.server -> (Tls_lwt.Unix.t * Lwt_unix.sockaddr) Lwt.t
 
 val read : Tls_lwt.Unix.t -> Uri.t Lwt.t
 

@@ -111,10 +111,10 @@ let defconfig = {
          );
 }
 
-(* TODO: state monad instead of:
-    - passing state manually
-    - making state a global/internal variable
-    ... or maybe I should go with the private variable route *)
+let cfg = ref defconfig
+
+let setconfig c = cfg := c [@@inline]
+let getconfig () = !cfg [@@inline]
 
 (* init functions *)
 
@@ -137,7 +137,8 @@ let get_handler cfg uri =
  * define their own handling logic.  *)
 
 
-let build_workspace cfg =
+let build_workspace () =
+    let cfg = getconfig () in
     let rec descend dir =
         match Sys.readdir dir with
         | exception _-> ()
@@ -155,14 +156,16 @@ let build_workspace cfg =
     register_handler cfg cfg.handldef "/";
     descend "."
 
-let init_socket cfg = let open Lu in
+let init_socket () = let open Lu in
+    let cfg = getconfig () in
     let sock = cfg.sock in
     let addr = ADDR_INET(cfg.host, cfg.port) in
     setsockopt sock SO_REUSEADDR true;
     bind sock addr >|= fun () ->
     Lu.listen sock cfg.nofcon
 
-let init_ssl cfg =
+let init_ssl () =
+    let cfg = getconfig () in
     let+ cert = X509_lwt.private_of_pems
         ~priv_key:cfg.keypath
         ~cert:cfg.crtpath
@@ -173,13 +176,26 @@ let init_ssl cfg =
         ~authenticator:null_auth ()
 
 let init cfg =
-    let* _sock = init_socket cfg in
-    let* state = init_ssl cfg in
-    let _workd = build_workspace cfg in
+    setconfig cfg;
+    let* _sock = init_socket() in
+    let* state = init_ssl() in
+    let _workd = build_workspace() in
         L.return state
 
+let reinit cfg =
+    let old = getconfig() in
+        setconfig cfg;
+    let* _sock = init_socket () in
+    let* state = init_ssl () in
+    let _workd = build_workspace () in
+        Lu.close old.sock >>= fun () ->
+        L.return state
+
+
+
 (* loop functions *)
-let recv server cfg =
+let recv server =
+    let cfg = getconfig () in
     Tls_lwt.Unix.accept server cfg.sock
 
 let read session =

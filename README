@@ -11,9 +11,9 @@ let conf = {
 }
 
 let main () =
-    let* state = init conf in
+    let* server = init conf in
     let rec loop () =
-        let* session, _ = recv state conf in
+        let* session, _ = recv server in
         let* request = read session in
         let  handler = get_handler conf (Uri.path request) in
         let  ans = handler request in
