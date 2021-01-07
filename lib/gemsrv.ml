@@ -63,8 +63,9 @@ type header = status * string
 type bodied = status * string * Unix.file_descr
 type answer = Header of header
             | Bodied of bodied
+type handler = Uri.t -> answer
 
-type state = {
+type config = {
     (* paths*)
     workdir  : string;
     keypath  : string;
@@ -79,11 +80,11 @@ type state = {
     (* gemini stuff *)
     hdrlen   : int;
     nofcon   : int;
-    handlers : (string, Uri.t -> answer) Hashtbl.t;
-    handldef : Uri.t -> answer;
+    handlers : (string, handler) Hashtbl.t;
+    handldef : handler;
 }
 
-let statedef = {
+let defconfig = {
     workdir  = Filename.concat (Sys.getcwd()) "gemini";
     keypath  = Filename.concat (Sys.getcwd()) "cert.key";
     crtpath  = Filename.concat (Sys.getcwd()) "cert.crt";
@@ -96,22 +97,20 @@ let statedef = {
     nofcon   = 15;
     handlers = Hashtbl.create 64 ~random:true;
     handldef = fun uri ->
-    Uri.(path uri |> pct_decode)
+     Uri.(path uri |> pct_decode)
       |> (function
-          | "" -> "index.gmi"
-          | p when String.ends_with p "/" -> Filename.(concat p "index.gmi")
-          | p -> p)
+         | "" -> "index.gmi"
+         | p when String.ends_with p "/" -> Filename.(concat p "index.gmi")
+         | p -> p)
       |> String.split ~sep:"/"
       |> List.filter ((<>) "..")
       |> String.concat "/"
       |> Filename.concat "."
-      |> (fun file ->
-          let ans = match Unix.(openfile file [O_RDONLY] 0) with
-            | exception _->
-                    Header(Notfound, "Page Requested Not Foud.")
-            | fd ->
-                    Bodied(Success, "text/gemini", fd)
-          in ans);
+      |> (fun path ->
+           match Unix.(openfile path [O_RDONLY;O_NONBLOCK] 0) with
+            | exception _-> Header(Notfound, "Page Requested Not Foud.")
+            | file_descr -> Bodied(Success,  "text/gemini", file_descr)
+         );
 }
 
 (* TODO: state monad instead of:
