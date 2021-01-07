@@ -18,34 +18,33 @@ type status =
   | Unauthorized
   | Invalid
 
-type header = status * string
+type head = status * Text.t
 
-type bodied = status * string * Unix.file_descr
+type body = status * Text.t * in_channel
 
-type answer = Header of header | Bodied of bodied
+type answer = Head of head | Body of body
 
 type handler = Uri.t -> answer
 
 type config = {
-  workdir  : string;
-  keypath  : string;
-  crtpath  : string;
+  workdir  : Text.t;
+  keypath  : Text.t;
+  crtpath  : Text.t;
   port     : int;
   host     : Lwt_unix.inet_addr;
   sock     : Lwt_unix.file_descr;
   tlsver   : Tls.Core.tls_version * Tls.Core.tls_version;
-  nofcon   : int;
-  handlers : (string, handler) Hashtbl.t;
-  handldef : handler;
+  maxcon   : int;
 }
 
 val intcode : status -> int
 
 val defconfig : config
 
-val register_handler : config -> handler -> string -> unit
+(** string should be the result of Text.encode |> Uri.pct_encode **)
+val register_handler : handler -> string -> unit
 
-val get_handler : config -> string -> handler
+val get_handler : string -> handler
 
 val init : config -> Tls.Config.server Lwt.t
 
@@ -54,5 +53,7 @@ val reinit : config -> Tls.Config.server Lwt.t
 val recv : Tls.Config.server -> (Tls_lwt.Unix.t * Lwt_unix.sockaddr) Lwt.t
 
 val read : Tls_lwt.Unix.t -> Uri.t Lwt.t
+
+val handle : handler
 
 val write : Tls_lwt.Unix.t -> answer -> unit Lwt.t
