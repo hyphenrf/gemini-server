@@ -15,8 +15,7 @@ let main () =
     let rec loop () =
         let* session, _ = recv server in
         let* request = read session in
-        let  handler = get_handler conf (Uri.path request) in
-        let  ans = handler request in
+        let  ans = handle request in
         let* res = write session ans in
             loop res
     in
