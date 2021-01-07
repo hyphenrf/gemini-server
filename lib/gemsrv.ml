@@ -10,22 +10,21 @@ module H = Handle
 
 
 let init cfg =
-    S.setconfig cfg;
-    Sys.chdir cfg.workdir;
-    let* _sock = S.init_socket () in
-    let* state = S.init_ssl () in
-    let _workd = H.build_workspace (Sys.getcwd()) in
-        Lwt.return state
+    let  _ = S.setconfig cfg in
+    let* _ = S.init_socket () in
+    let* s = S.init_ssl () in
+    let  _ = H.build_workspace cfg.workdir in
+    let  _ = Sys.chdir cfg.workdir in
+             Lwt.return s
 
 let reinit cfg =
-    let old = S.getconfig () in
-        S.setconfig cfg;
-    Sys.chdir cfg.workdir;
-    let* _sock = S.init_socket () in
-    let* state = S.init_ssl () in
-    let _workd = H.build_workspace (Sys.getcwd()) in
-        Lwt_unix.close old.sock >>= fun () ->
-        Lwt.return state
+    let* _ = Lwt_unix.close (S.getconfig()).sock in
+    let  _ = S.setconfig cfg in
+    let* _ = S.init_socket () in
+    let* s = S.init_ssl () in
+    let  _ = H.build_workspace cfg.workdir in
+    let  _ = Sys.chdir cfg.workdir in
+             Lwt.return s
 
 let recv server =
     let cfg = S.getconfig () in
